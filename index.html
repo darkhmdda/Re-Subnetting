@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Herramienta práctica para resolver y practicar subnetting IPv4.">
+  <title>Re:Subnetting</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar no-print">
+  <a class="brand" href="#top" aria-label="Re:Subnetting, inicio">
+    <img src="logo.png" alt="Re:Subnetting" class="brand-logo">
+  </a>
+
+  <div class="top-actions">
+    <button class="btn btn-quiet" id="btnExample" type="button">
+      Cargar ejemplo
+    </button>
+    <button class="btn btn-primary" id="btnPdf" type="button">
+      Imprimir / Guardar PDF
+    </button>
+  </div>
+</header>
+
+<main class="container" id="top">
+
+  <section class="intro">
+    <div>
+      <div class="eyebrow">LABORATORIO DE DIRECCIONAMIENTO IPv4</div>
+      <h1>Subnetting, paso a paso.</h1>
+      <p>
+        Resuelve manualmente los cálculos y usa la comprobación para
+        verificar tus respuestas. La tabla de direcciones se genera
+        automáticamente.
+      </p>
+    </div>
+
+    <div class="mode-control no-print" role="group" aria-label="Modo de resolución">
+      <button class="mode-btn active" data-mode="manual" type="button">
+        Manual
+      </button>
+      <button class="mode-btn" data-mode="auto" type="button">
+        Automático
+      </button>
+    </div>
+  </section>
+
+  <section class="card" id="problemCard">
+    <div class="section-heading">
+      <span class="section-number">01</span>
+      <div>
+        <h2>Datos del problema</h2>
+        <p>
+          Introduce la dirección de red y selecciona si el ejercicio
+          solicita NSU, NHU, ambos requisitos o notación CIDR.
+        </p>
+      </div>
+    </div>
+
+    <div class="problem-grid">
+      <label class="field field-ip">
+        <span>Dirección de red</span>
+        <input
+          id="ipAddress"
+          type="text"
+          inputmode="decimal"
+          value="192.10.10.0"
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <small>Ejemplo: 192.10.10.0</small>
+      </label>
+
+      <label class="field">
+        <span>Tipo de ejercicio</span>
+        <select id="exerciseType">
+          <option value="nsu" selected>Subredes útiles (NSU)</option>
+          <option value="nhu">Hosts útiles (NHU)</option>
+          <option value="both">Ambos (NSU + NHU)</option>
+          <option value="cidr">Notación CIDR (/n)</option>
+        </select>
+      </label>
+
+      <label class="field" id="nsuField">
+        <span>No. de Subredes Útiles (NSU)</span>
+        <input id="requiredSubnets" type="number" min="1" step="1" value="14">
+      </label>
+
+      <label class="field" id="nhuField" hidden>
+        <span>No. de Hosts Útiles por subred (NHU)</span>
+        <input id="requiredHosts" type="number" min="1" step="1" value="30">
+      </label>
+
+      <label class="field" id="cidrField" hidden>
+        <span>Longitud de Prefijo CIDR (/n)</span>
+        <input id="cidrPrefixInput" type="number" min="1" max="30" step="1" value="16" placeholder="Ej: 16">
+      </label>
+    </div>
+
+    <div class="mode-hint" id="problemRequirementHint">
+      Modo NSU: se calcularán los bits de subred necesarios y se
+      conservarán al menos 2 bits para hosts.
+    </div>
+
+    <div class="mode-hint" id="modeDescription">
+      Modo manual: completa tus cálculos. Los bits de host se obtienen
+      automáticamente según los requisitos seleccionados.
+    </div>
+
+    <div class="action-row no-print" id="autoActionRow">
+      <button class="btn btn-primary" id="btnResolve" type="button" hidden>
+        Calcular solución
+      </button>
+      <button class="btn btn-quiet" id="btnResetWork" type="button">
+        Limpiar respuestas manuales
+      </button>
+      <span id="statusMessage" class="status-message" role="status"></span>
+    </div>
+  </section>
+
+  <section class="card" id="classesCard">
+    <div class="section-heading">
+      <span class="section-number">02</span>
+      <div>
+        <h2>Tabla de clases IP</h2>
+        <p>Referencia rápida para identificar la clase y la máscara por defecto.</p>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="reference-table">
+        <thead>
+          <tr>
+            <th>Clase</th>
+            <th>Primer octeto</th>
+            <th>MSD</th>
+            <th>Uso general</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="class-chip class-a">A</span></td>
+            <td>1–127*</td>
+            <td class="mono">255.0.0.0</td>
+            <td>Redes grandes</td>
+          </tr>
+          <tr>
+            <td><span class="class-chip class-b">B</span></td>
+            <td>128–191</td>
+            <td class="mono">255.255.0.0</td>
+            <td>Redes medianas</td>
+          </tr>
+          <tr>
+            <td><span class="class-chip class-c">C</span></td>
+            <td>192–223</td>
+            <td class="mono">255.255.255.0</td>
+            <td>Redes pequeñas</td>
+          </tr>
+          <tr>
+            <td><span class="class-chip class-d">D</span></td>
+            <td>224–239</td>
+            <td>—</td>
+            <td>Multicast</td>
+          </tr>
+          <tr>
+            <td><span class="class-chip class-e">E</span></td>
+            <td>240–255</td>
+            <td>—</td>
+            <td>Reservada / experimental</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="footnote">
+      * Se conserva el rango de los apuntes de clase. En redes reales,
+      127.0.0.0/8 está reservado para loopback.
+    </p>
+  </section>
+
+  <section class="card" id="requestedCard">
+    <div class="section-heading">
+      <span class="section-number">03</span>
+      <div>
+        <h2>Lo que pide el ejercicio</h2>
+        <p>
+          En manual, escribe tus resultados. La clase y la MSD se completan
+          al seleccionar la clase; los demás campos quedan para resolver.
+        </p>
+      </div>
+    </div>
+
+    <div id="manualAnswerFields" class="answer-fields"></div>
+    <div id="autoAnswerFields" class="result-grid" hidden></div>
+    <div id="autoProcedure" class="procedure-list" hidden></div>
+  </section>
+
+  <section class="card" id="practiceCard">
+    <div class="section-heading">
+      <span class="section-number">04</span>
+      <div>
+        <h2>Parte práctica: máscara en binario</h2>
+        <p>
+          Construye la máscara tomando bits para subred y deja los restantes
+          para hosts.
+        </p>
+      </div>
+    </div>
+
+    <div class="practice-controls no-print">
+      <div class="practice-left-group">
+        <label class="field">
+          <span>Clase de referencia</span>
+          <select id="manualClass">
+            <option value="">Seleccionar clase…</option>
+            <option value="A">A — /8</option>
+            <option value="B">B — /16</option>
+            <option value="C">C — /24</option>
+          </select>
+        </label>
+
+        <div class="practice-summary">
+          <strong>Bits tomados (NBT):</strong>
+          <span id="practiceNbt">—</span>
+          <strong>Bits de host:</strong>
+          <span id="practiceHostBits">—</span>
+        </div>
+      </div>
+
+      <!-- Mini calculadora rápida 2ⁿ mejorada -->
+      <div class="power-calc-box">
+        <div class="power-calc-header">
+          <span class="power-calc-title">Calculadora 2ⁿ</span>
+          <div class="power-calc-input-group">
+            <span class="power-base">2</span>
+            <span class="power-sign">^</span>
+            <input type="number" id="powerExponent" min="0" max="30" value="4" aria-label="Exponente n">
+          </div>
+        </div>
+
+        <div class="power-calc-divider"></div>
+
+        <div class="power-calc-stats">
+          <div class="power-stat">
+            <span class="stat-label">Total (2ⁿ)</span>
+            <strong id="powerTotal" class="stat-value">16</strong>
+          </div>
+          <div class="power-stat">
+            <span class="stat-label">Útiles (2ⁿ - 2)</span>
+            <strong id="powerUseful" class="stat-value primary-value">14</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="binaryWorkspace" class="binary-workspace">
+      <div class="empty-state">
+        Selecciona una clase para mostrar la máscara binaria.
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="tableCard">
+    <div class="section-heading">
+      <span class="section-number">05</span>
+      <div>
+        <h2>Tabla de direcciones</h2>
+        <p>
+          Se genera automáticamente con la IP, la clase y los requisitos
+          seleccionados. Puedes cambiar el número de filas.
+        </p>
+      </div>
+    </div>
+
+    <div class="table-controls no-print">
+      <label class="field">
+        <span>Iniciar en subred n.º</span>
+        <input id="tableStart" type="number" min="0" step="1" value="0">
+      </label>
+
+      <label class="field">
+        <span>Cantidad de filas</span>
+        <input id="tableCount" type="number" min="1" max="200" step="1" value="10">
+      </label>
+
+      <label class="check-field">
+        <input id="onlyUseful" type="checkbox" checked>
+        <span>Mostrar solo subredes útiles</span>
+      </label>
+
+      <button class="btn btn-quiet" id="btnGenerateTable" type="button">
+        Actualizar tabla
+      </button>
+    </div>
+
+    <div class="table-scroll">
+      <table class="address-table">
+        <thead>
+          <tr>
+            <th>No.</th>
+            <th>No. Subred</th>
+            <th>Difusión (Broadcast)</th>
+            <th>Rango de hosts</th>
+            <th>Direcciones asignables</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="addressTableBody"></tbody>
+      </table>
+    </div>
+
+    <p class="table-note" id="tableModeNote">
+      Tabla generada automáticamente.
+    </p>
+  </section>
+
+  <section class="card" id="questionsCard">
+    <div class="section-heading">
+      <span class="section-number">06</span>
+      <div>
+        <h2>Preguntas</h2>
+        <p>
+          Escribe tus respuestas. En automático se muestran los resultados;
+          en manual se pueden comprobar con el botón al final.
+        </p>
+      </div>
+    </div>
+
+    <div class="question-controls no-print">
+      <label class="field">
+        <span>Pregunta 1 · Subred útil n.º</span>
+        <input id="q1n" type="number" min="1" step="1" value="3">
+      </label>
+
+      <label class="field">
+        <span>Pregunta 2 · Subred útil n.º</span>
+        <input id="q2n" type="number" min="1" step="1" value="7">
+      </label>
+
+      <label class="field">
+        <span>Pregunta 3 · Subred útil n.º</span>
+        <input id="q3n" type="number" min="1" step="1" value="12">
+      </label>
+
+      <label class="field">
+        <span>Pregunta 4 · Subred útil n.º</span>
+        <input id="q4n" type="number" min="1" step="1" value="8">
+      </label>
+    </div>
+
+    <p class="table-note" id="questionLimitNote">
+      Los números de subred se limitarán al total de subredes útiles calculadas.
+    </p>
+    <div id="questions" class="questions-list"></div>
+
+    <!-- Botón comprobar respuestas movido al final del laboratorio -->
+    <div class="manual-check-container no-print" id="manualCheckContainer" style="margin-top: 20px;">
+      <button class="btn btn-check" id="btnCheck" type="button">
+        Comprobar respuestas
+      </button>
+      <span id="manualStatusMessage" class="status-message" role="status" style="margin-left: 10px;"></span>
+    </div>
+  </section>
+
+  <footer>
+    <span>Re:Subnetting</span>
+    <span class="footer-standard">
+      Herramienta académica · IPv4 classful
+      <span
+        class="standard-tooltip"
+        tabindex="0"
+        role="note"
+        aria-label="Información sobre el criterio académico"
+        data-tooltip="Este ejercicio aplica la convención histórica de RFC 950, que excluía la subred cero y la subred de todos unos. En redes modernas, ambas suelen poder utilizarse; con 3 bits de subred podrían usarse las 8 subredes si el curso adopta ese criterio."
+      >ⓘ</span>
+    </span>
+  </footer>
+
+</main>
+
+<!-- Mini reproductor flotante -->
+<aside
+  class="mini-player no-print"
+  id="miniPlayer"
+  aria-label="Reproductor de música"
+>
+  <div class="mini-player-header">
+    <div class="mini-player-info">
+      <span class="player-label">RE:SUBNETTING · MÚSICA</span>
+      <strong id="trackTitle">Preparando reproductor...</strong>
+    </div>
+
+    <button
+      type="button"
+      id="togglePlayer"
+      class="player-toggle"
+      aria-label="Minimizar reproductor"
+      aria-expanded="true"
+      title="Minimizar reproductor"
+    >−</button>
+  </div>
+
+  <div class="player-controls">
+    <button
+      type="button"
+      id="prevTrack"
+      aria-label="Canción anterior"
+      title="Canción anterior"
+    >|◀</button>
+
+    <button
+      type="button"
+      id="playPauseMusic"
+      aria-label="Reproducir música"
+      title="Reproducir"
+    >▶</button>
+
+    <button
+      type="button"
+      id="nextTrack"
+      aria-label="Siguiente canción"
+      title="Siguiente canción"
+    >▶|</button>
+
+    <button
+      type="button"
+      id="muteMusic"
+      aria-label="Silenciar música"
+      title="Silenciar"
+    >Vol.</button>
+  </div>
+
+  <label class="player-volume">
+    <span>Volumen</span>
+    <input
+      id="volumeControl"
+      type="range"
+      min="0"
+      max="1"
+      step="0.05"
+      value="0.35"
+    >
+  </label>
+
+  <audio id="backgroundMusic" preload="metadata"></audio>
+</aside>
+
+<script src="app.js"></script>
+</body>
+</html>
