@@ -1463,3 +1463,512 @@ loadExample();
 
   setMinimized(savedMinimized);
 })();
+
+/* =========================================================
+   MODO EXAMEN: CARGA DEL PDF, GUARDADO Y AUTORRELLENO
+   Lee la hoja del profesor con PDF.js, detecta los problemas y
+   escribe las respuestas encima con pdf-lib, ubicándolas a partir
+   de las etiquetas impresas ("Clase:", "1. ¿Cuál es…", etc.) para
+   no depender de coordenadas fijas.
+   ========================================================= */
+(() => {
+  const STORE_KEY = "resub_exam_v1";
+  const INK = [0.05, 0.2, 0.55];          // azul tinta
+  const ANSWER_X = 304;                    // las rayas de respuesta van de x=300 a x=520
+  const ANSWER_MAX_X = 518;
+  const QUESTION_X = 86;                   // las rayas de pregunta van de x=80 a x=540
+  const QUESTION_MAX_X = 538;
+  const BOX_LEFT = 58, BOX_RIGHT = 554, BOX_BOTTOM = 46;
+
+  const FIELD_DEFS = [
+    ["class", /^clase:/],
+    ["msd",   /^mascara de subred \(por defecto\)/],
+    ["msa",   /^mascara de subred \(adaptada\)/],
+    ["nts",   /^no total de subredes/],
+    ["ntsu",  /^no de subredes utiles:/],
+    ["nth",   /^no total de direcciones de host/],
+    ["nthu",  /^no de direcciones utiles/],
+    ["nbt",   /^no de bits cogidos/]
+  ];
+
+  const uploadInput = $("#pdfUploadInput");
+  const btnLoadPdf = $("#btnLoadExamPdf");
+  const toolbar = $("#examToolbar");
+  const problemSelect = $("#examProblemSelect");
+  const badge = $("#examStatusBadge");
+  const frame = $("#examPreviewFrame");
+  const offX = $("#examOffsetX");
+  const offY = $("#examOffsetY");
+  if (!uploadInput || !btnLoadPdf || !toolbar) return;
+
+  let pdfBytes = null;
+  let pdfSig = "";
+  let problems = [];
+  let layouts = {};      // { pageIndex: [líneas de texto] }
+  let saved = {};        // { numProblema: respuestas }
+  let previewUrl = null;
+
+  /* ---------- utilidades ---------- */
+  const norm = s => String(s || "").normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Helvetica (WinAnsi) no puede codificar cualquier carácter: se limpia.
+  const safe = s => String(s ?? "")
+    .replace(/[   ]/g, " ")
+    .replace(/→/g, "->").replace(/≥/g, ">=").replace(/≤/g, "<=")
+    .replace(/[^\x20-\x7E -ÿ–—‘’“”•…]/g, "?");
+
+  function msg(text, kind = "info") {
+    const n = Object.keys(saved).length;
+    const progress = problems.length ? ` · Guardados: ${n} de ${problems.length}` : "";
+    badge.textContent = text + progress;
+    badge.style.color = kind === "good" ? "var(--good)" : kind === "bad" ? "var(--bad)" : "var(--muted)";
+  }
+
+  function libsReady() {
+    if (typeof pdfjsLib === "undefined" || typeof PDFLib === "undefined") {
+      toolbar.hidden = false;
+      msg("No se cargaron las librerías PDF. Se necesita internet (al menos la primera vez); recarga la página.", "bad");
+      return false;
+    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    return true;
+  }
+
+  /* ---------- persistencia local (por si se cierra la pestaña) ---------- */
+  function persist() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        sig: pdfSig, saved,
+        fields: {
+          name: $("#examStudentName").value, group: $("#examStudentGroup").value,
+          date: $("#examStudentDate").value, dx: offX.value, dy: offY.value
+        }
+      }));
+    } catch {}
+  }
+
+  function readStore() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; }
+  }
+
+  (() => {
+    const st = readStore();
+    if (!st?.fields) return;
+    $("#examStudentName").value = st.fields.name ?? $("#examStudentName").value;
+    $("#examStudentGroup").value = st.fields.group ?? "";
+    $("#examStudentDate").value = st.fields.date ?? $("#examStudentDate").value;
+    offX.value = st.fields.dx ?? 0;
+    offY.value = st.fields.dy ?? 0;
+  })();
+
+  ["examStudentName", "examStudentGroup", "examStudentDate", "examOffsetX", "examOffsetY"]
+    .forEach(id => $("#" + id).addEventListener("input", persist));
+
+  /* ---------- lectura del PDF ---------- */
+  async function extractLines(page) {
+    const tc = await page.getTextContent();
+    const items = tc.items
+      .filter(i => i.str && i.str.length)
+      .map(i => ({
+        str: i.str, x: i.transform[4], y: i.transform[5],
+        size: Math.hypot(i.transform[0], i.transform[1]) || i.height || 11, w: i.width
+      }))
+      .sort((a, b) => b.y - a.y || a.x - b.x);
+
+    const lines = [];
+    for (const it of items) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(last.y - it.y) <= 2) last.items.push(it);
+      else lines.push({ y: it.y, items: [it] });
+    }
+
+    lines.forEach(line => {
+      line.items.sort((a, b) => a.x - b.x);
+      let text = "", prevEnd = null;
+      line.items.forEach(it => {
+        if (prevEnd !== null && it.x - prevEnd > 1.5 && !text.endsWith(" ") && !it.str.startsWith(" ")) text += " ";
+        it.start = text.length;
+        text += it.str;
+        prevEnd = it.x + it.w;
+      });
+      line.text = text;
+      line.x = line.items[0].x;
+      line.n = norm(text);
+    });
+    return lines;
+  }
+
+  function parseProblem(lines, pageIndex) {
+    const head = lines.find(l => /^problema\s+\d+/.test(l.n));
+    if (!head) return null;
+
+    const num = Number(head.n.match(/^problema\s+(\d+)/)[1]);
+    const grab = re => {
+      for (const l of lines) {
+        const m = l.n.match(re);
+        if (m) return m;
+      }
+      return null;
+    };
+
+    const nsuM = grab(/subredes utiles necesarias:?\s*([\d.,]+)/);
+    const nhuM = grab(/hosts utiles necesarios:?\s*([\d.,]+)/);
+    const ipM = grab(/direccion de red:?\s*(\d{1,3}(?:\.\d{1,3}){3})(?:\s*\/\s*(\d{1,2}))?/);
+    if (!ipM) return null;
+
+    const toNum = s => Number(String(s).replace(/,/g, ""));
+    const prob = { num, page: pageIndex, ip: ipM[1], q: [] };
+
+    if (ipM[2]) {
+      prob.type = "cidr";
+      prob.cidr = Number(ipM[2]);
+    } else if (nsuM && nhuM) {
+      prob.type = "both";
+    } else if (nsuM) {
+      prob.type = "nsu";
+    } else if (nhuM) {
+      prob.type = "nhu";
+    } else {
+      return null;
+    }
+
+    if (nsuM && prob.type !== "cidr") prob.nsu = toNum(nsuM[1]);
+    if (nhuM && prob.type !== "cidr") prob.nhu = toNum(nhuM[1]);
+
+    lines.forEach(l => {
+      const qm = l.text.match(/^\s*([1-4])\.\s*¿/);
+      if (!qm) return;
+      const om = l.text.match(/(\d+)\s*[ºªo°]/);
+      prob.q[Number(qm[1]) - 1] = om ? Number(om[1]) : 1;
+    });
+
+    if (prob.q.length !== 4 || prob.q.some(v => !v)) return null;
+    return prob;
+  }
+
+  uploadInput.addEventListener("change", async e => {
+    const file = e.target.files?.[0];
+    uploadInput.value = "";
+    if (!file || !libsReady()) return;
+
+    try {
+      pdfBytes = new Uint8Array(await file.arrayBuffer());
+      pdfSig = `${file.name}|${file.size}`;
+
+      const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+      layouts = {};
+      problems = [];
+
+      for (let p = 1; p <= doc.numPages; p++) {
+        const lines = await extractLines(await doc.getPage(p));
+        layouts[p - 1] = lines;
+        const prob = parseProblem(lines, p - 1);
+        if (prob) problems.push(prob);
+      }
+
+      if (!problems.length) {
+        toolbar.hidden = false;
+        msg("No encontré problemas en ese PDF. Verifica que sea Ejercicios_Subredes_Alumnos.pdf.", "bad");
+        return;
+      }
+
+      const st = readStore();
+      saved = st && st.sig === pdfSig && st.saved ? st.saved : {};
+
+      toolbar.hidden = false;
+      renderSelector();
+      loadProblem(problems[0].num);
+      const restored = Object.keys(saved).length;
+      msg(`PDF cargado: ${problems.length} problemas detectados${restored ? `; recuperé ${restored} guardados` : ""}.`, "good");
+    } catch (err) {
+      console.error(err);
+      toolbar.hidden = false;
+      msg("No se pudo leer el PDF seleccionado.", "bad");
+    }
+  });
+
+  btnLoadPdf.addEventListener("click", () => {
+    if (libsReady()) uploadInput.click();
+  });
+
+  /* ---------- selector y carga al laboratorio ---------- */
+  function renderSelector() {
+    const keep = problemSelect.value;
+    problemSelect.innerHTML = problems.map(p =>
+      `<option value="${p.num}">Problema ${p.num} · ${p.ip}${p.cidr ? "/" + p.cidr : ""}${saved[p.num] ? " ✓" : ""}</option>`
+    ).join("");
+    if (keep) problemSelect.value = keep;
+  }
+
+  function currentProblem() {
+    return problems.find(p => p.num === Number(problemSelect.value));
+  }
+
+  function loadProblem(num) {
+    const prob = problems.find(p => p.num === Number(num));
+    if (!prob) return;
+    problemSelect.value = String(prob.num);
+
+    $("#ipAddress").value = prob.ip;
+    $("#exerciseType").value = prob.type;
+    if (prob.nsu != null) $("#requiredSubnets").value = prob.nsu;
+    if (prob.nhu != null) $("#requiredHosts").value = prob.nhu;
+    if (prob.cidr != null) $("#cidrPrefixInput").value = prob.cidr;
+    updateExerciseInputs();
+    prob.q.forEach((n, i) => { $(`#q${i + 1}n`).value = n; });
+
+    clearManualAnswers();
+    selectManualClass("");
+    currentSolution = null;
+
+    const ex = saved[prob.num];
+    if (ex?.class) selectManualClass(ex.class);
+
+    if (currentMode === "auto") {
+      resolveAndRender();
+    } else {
+      renderTable();
+      renderQuestions();
+      renderBinaryWorkspace();
+    }
+
+    if (ex) {
+      $$("[data-answer]").forEach(inp => {
+        const key = inp.dataset.answer;
+        if (key !== "class" && key !== "msd" && ex[key] !== undefined) inp.value = ex[key];
+      });
+      manualQuestionAnswers = [0, 1, 2, 3].map(i => ex.questions?.[i] || "");
+      $$("[data-question-answer]").forEach(t => {
+        t.value = manualQuestionAnswers[Number(t.dataset.questionAnswer)] || "";
+      });
+    }
+
+    msg(`Problema ${prob.num} cargado en el laboratorio.`, "info");
+  }
+
+  problemSelect.addEventListener("change", e => loadProblem(e.target.value));
+
+  const step = delta => {
+    if (!problems.length) return;
+    const i = Math.min(problems.length - 1, Math.max(0, problemSelect.selectedIndex + delta));
+    loadProblem(problems[i].num);
+  };
+  $("#btnExamPrev").addEventListener("click", () => step(-1));
+  $("#btnExamNext").addEventListener("click", () => step(1));
+
+  /* ---------- guardado ---------- */
+  function workspaceMatches(prob) {
+    const sameQ = prob.q.every((n, i) => Number($(`#q${i + 1}n`).value) === n);
+    return $("#ipAddress").value.trim() === prob.ip &&
+      $("#exerciseType").value === prob.type &&
+      (prob.nsu == null || Number($("#requiredSubnets").value) === prob.nsu) &&
+      (prob.nhu == null || Number($("#requiredHosts").value) === prob.nhu) &&
+      (prob.cidr == null || Number($("#cidrPrefixInput").value) === prob.cidr) &&
+      sameQ;
+  }
+
+  function buildProcedure(sol) {
+    const dp = sol.defaultPrefix;
+    const hostClass = 32 - dp;
+    const lines = [
+      `1) Clase ${sol.class}: el primer octeto es ${sol.ip[0]}. MSD = ${sol.defaultMask.join(".")} (/${dp}).`
+    ];
+
+    if (sol.exerciseType === "nsu") {
+      lines.push(`2) Se piden ${sol.requiredSubnets} subredes utiles: 2^${sol.nbt} - 2 = ${sol.ntsu} >= ${sol.requiredSubnets}, por lo que NBT = ${sol.nbt} bits.`);
+    } else if (sol.exerciseType === "nhu") {
+      lines.push(`2) Se piden ${sol.requiredHosts} hosts utiles: 2^${sol.hostBits} - 2 = ${sol.nthu} >= ${sol.requiredHosts}, por lo que quedan ${sol.hostBits} bits de host y NBT = ${hostClass} - ${sol.hostBits} = ${sol.nbt}.`);
+    } else if (sol.exerciseType === "both") {
+      lines.push(`2) Se piden ${sol.requiredSubnets} subredes utiles: 2^${sol.nbt} - 2 = ${sol.ntsu} >= ${sol.requiredSubnets}, por lo que NBT = ${sol.nbt}. Quedan ${sol.hostBits} bits de host: 2^${sol.hostBits} - 2 = ${sol.nthu} >= ${sol.requiredHosts}, cumple ambos requisitos.`);
+    } else {
+      lines.push(`2) Prefijo /${sol.cidrPrefix}: NBT = ${sol.cidrPrefix} - ${dp} = ${sol.nbt} bits de subred y 32 - ${sol.cidrPrefix} = ${sol.hostBits} bits de host.`);
+    }
+
+    lines.push(`3) MSA: /${dp} + ${sol.nbt} = /${sol.prefix} -> ${sol.msa.join(".")}. Salto = 2^${sol.hostBits} = ${sol.blockSize}.`);
+    lines.push(`4) NTS = 2^${sol.nbt} = ${sol.nts}; NTSU = ${sol.nts} - 2 = ${sol.ntsu}. NTH = 2^${sol.hostBits} = ${sol.nth}; NTHU = ${sol.nth} - 2 = ${sol.nthu}.`);
+    lines.push(`5) Subred util k: red = red base + k x salto; difusion = siguiente red - 1; hosts = red + 1 hasta difusion - 1.`);
+    return lines;
+  }
+
+  function collectAnswers() {
+    const sol = calculate();
+    const procedure = buildProcedure(sol);
+
+    if (currentMode === "auto") {
+      return {
+        class: sol.class,
+        msd: sol.defaultMask.join("."),
+        msa: sol.msa.join("."),
+        nts: String(sol.nts), ntsu: String(sol.ntsu),
+        nth: String(sol.nth), nthu: String(sol.nthu),
+        nbt: String(sol.nbt),
+        questions: [1, 2, 3, 4].map(i =>
+          expectedQuestion(sol, Math.max(1, Math.floor(Number($(`#q${i}n`).value) || 1)), i - 1) || ""),
+        procedure
+      };
+    }
+
+    const data = { questions: ["", "", "", ""], procedure };
+    $$("[data-answer]").forEach(inp => { data[inp.dataset.answer] = inp.value.trim(); });
+    $$("[data-question-answer]").forEach(t => {
+      data.questions[Number(t.dataset.questionAnswer)] = t.value.trim();
+    });
+    return data;
+  }
+
+  $("#btnSaveProblemToExam").addEventListener("click", () => {
+    const prob = currentProblem();
+    if (!prob) return msg("Primero carga el PDF del examen.", "bad");
+
+    if (!workspaceMatches(prob)) {
+      return msg(`Los datos del laboratorio ya no coinciden con el Problema ${prob.num}. Vuelve a seleccionarlo en la lista (se perderán los cambios no guardados).`, "bad");
+    }
+
+    try {
+      saved[prob.num] = collectAnswers();
+      renderSelector();
+      persist();
+      msg(`Respuestas del Problema ${prob.num} guardadas.`, "good");
+    } catch (err) {
+      msg(err.message, "bad");
+    }
+  });
+
+  /* ---------- escritura sobre el PDF ---------- */
+  function wrap(text, font, size, maxW) {
+    const out = [];
+    let line = "";
+    safe(text).split(/\s+/).forEach(word => {
+      const trial = line ? line + " " + word : word;
+      if (font.widthOfTextAtSize(trial, size) <= maxW || !line) line = trial;
+      else { out.push(line); line = word; }
+    });
+    if (line) out.push(line);
+    return out;
+  }
+
+  async function buildFilledPdf() {
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const doc = await PDFDocument.load(pdfBytes);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const reg = await doc.embedFont(StandardFonts.Helvetica);
+    const color = rgb(...INK);
+    const dx = Number(offX.value) || 0;
+    const dy = Number(offY.value) || 0;
+    const pages = doc.getPages();
+    const warnings = [];
+
+    const put = (page, text, x, y, size, font, maxX) => {
+      const t = safe(text);
+      if (!t) return;
+      let s = size;
+      while (s > 6 && font.widthOfTextAtSize(t, s) > maxX - x) s -= 0.5;
+      page.drawText(t, { x: x + dx, y: y + dy, size: s, font, color });
+    };
+
+    // Portada: se escribe justo después de cada etiqueta, sobre su raya "____".
+    const cover = pages[0];
+    const coverLines = layouts[0] || [];
+    [
+      ["Nombre:", $("#examStudentName").value],
+      ["Grupo:", $("#examStudentGroup").value],
+      ["Fecha:", $("#examStudentDate").value]
+    ].forEach(([label, value]) => {
+      if (!value.trim()) return;
+      const line = coverLines.find(l => l.text.includes(label));
+      const li = line ? line.text.indexOf(label) : -1;
+      const us = li >= 0 ? line.text.indexOf("_", li) : -1;
+      if (us < 0) return warnings.push(`portada (${label.replace(":", "")})`);
+
+      const run = line.text.slice(us).match(/^_+/)[0].length;
+      const xAt = idx => {
+        const it = [...line.items].reverse().find(i => i.start <= idx);
+        return it.x + reg.widthOfTextAtSize(safe(it.str.slice(0, idx - it.start)), it.size);
+      };
+      put(cover, value, xAt(us) + 3, line.y + 3, 12, bold, xAt(us + run));
+    });
+
+    problems.forEach(prob => {
+      const ans = saved[prob.num];
+      const page = pages[prob.page];
+      const lines = layouts[prob.page] || [];
+      if (!ans || !page) return;
+
+      FIELD_DEFS.forEach(([key, re]) => {
+        const line = lines.find(l => re.test(l.n));
+        if (!line) return warnings.push(`P${prob.num} ${key}`);
+        put(page, ans[key], ANSWER_X, line.y + 1, 11, bold, ANSWER_MAX_X);
+      });
+
+      lines.forEach(l => {
+        const m = l.text.match(/^\s*([1-4])\.\s*¿/);
+        if (m) put(page, ans.questions?.[Number(m[1]) - 1], QUESTION_X, l.y - 19, 10.5, bold, QUESTION_MAX_X);
+      });
+
+      const boxLabel = lines.find(l => /^muestre aqui/.test(l.n));
+      if (!boxLabel) return warnings.push(`P${prob.num} procedimiento`);
+
+      const top = boxLabel.y - 15;
+      const availH = top - 8 - BOX_BOTTOM;
+      const maxW = BOX_RIGHT - BOX_LEFT;
+      const parts = ans.procedure || [];
+
+      for (let size = 9.5; size >= 6; size -= 0.5) {
+        const lineH = size * 1.3;
+        const wrapped = parts.flatMap((p, i) => {
+          const w = wrap(p, reg, size, maxW);
+          return i < parts.length - 1 ? [...w, ""] : w;
+        });
+        if (wrapped.length * lineH <= availH || size === 6) {
+          wrapped.forEach((t, i) => {
+            if (t) page.drawText(t, { x: BOX_LEFT + dx, y: top - 13 - i * lineH + dy, size, font: reg, color });
+          });
+          break;
+        }
+      }
+    });
+
+    return { bytes: await doc.save(), warnings };
+  }
+
+  function warnText(w) {
+    return w.length ? ` Sin ancla (revisa): ${w.slice(0, 4).join(", ")}${w.length > 4 ? "…" : ""}.` : "";
+  }
+
+  $("#btnPreviewFilledPdf").addEventListener("click", async () => {
+    if (!pdfBytes) return msg("Primero carga el PDF del examen.", "bad");
+    try {
+      const { bytes, warnings } = await buildFilledPdf();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      const prob = currentProblem();
+      frame.src = `${previewUrl}#page=${prob ? prob.page + 1 : 1}`;
+      frame.hidden = false;
+      msg("Vista previa generada." + warnText(warnings), warnings.length ? "bad" : "good");
+    } catch (err) {
+      console.error(err);
+      msg("Error al generar la vista previa: " + err.message, "bad");
+    }
+  });
+
+  $("#btnDownloadFilledPdf").addEventListener("click", async () => {
+    if (!pdfBytes) return msg("Primero carga el PDF del examen.", "bad");
+    try {
+      const { bytes, warnings } = await buildFilledPdf();
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Ejercicios_Subredes_Resuelto.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      msg("PDF descargado." + warnText(warnings), warnings.length ? "bad" : "good");
+    } catch (err) {
+      console.error(err);
+      msg("Error al generar el PDF: " + err.message, "bad");
+    }
+  });
+})();

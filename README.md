@@ -100,3 +100,9 @@ Re-Subnetting/
     ├── So-Scandalous.mp3
     ├── OH-TENGO-SUERTE.mp3
     └── Re-Re.mp3
+
+---
+
+## Modo Examen (PDF)
+
+Con **Cargar PDF Examen** se sube la hoja `Ejercicios_Subredes_Alumnos.pdf`; la app detecta los 15 problemas (IP, tipo de ejercicio y las 4 preguntas), los carga uno a uno en el laboratorio y, con **Guardar en el examen**, conserva las respuestas y el procedimiento. **Descargar PDF completado** escribe todo sobre la hoja original. Las posiciones se calculan a partir de las etiquetas impresas del PDF y hay un ajuste fino (X/Y) y vista previa. Usa PDF.js y pdf-lib desde CDN, por lo que requiere internet. El avance se guarda en el navegador (`localStorage`).

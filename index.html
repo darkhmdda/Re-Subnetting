@@ -15,6 +15,10 @@
   </a>
 
   <div class="top-actions">
+    <input type="file" id="pdfUploadInput" accept="application/pdf" hidden>
+    <button class="btn btn-quiet" id="btnLoadExamPdf" type="button">
+      Cargar PDF Examen
+    </button>
     <button class="btn btn-quiet" id="btnExample" type="button">
       Cargar ejemplo
     </button>
@@ -45,6 +49,66 @@
         Automático
       </button>
     </div>
+  </section>
+
+  <section class="card no-print exam-card" id="examToolbar" hidden>
+    <div class="section-heading">
+      <span class="section-number">PDF</span>
+      <div>
+        <h2>Modo Examen: ejercicios cargados</h2>
+        <p>
+          Elige un problema, resuélvelo en el laboratorio y pulsa
+          «Guardar en el examen» antes de cambiar al siguiente. Al final
+          descarga la hoja original con tus respuestas escritas encima.
+        </p>
+      </div>
+    </div>
+
+    <div class="problem-grid">
+      <label class="field">
+        <span>Nombre del alumno</span>
+        <input type="text" id="examStudentName" value="Diego Miranda Esquivel" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Grupo</span>
+        <input type="text" id="examStudentGroup" placeholder="Ej. 5° A" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Fecha</span>
+        <input type="text" id="examStudentDate" value="21/11/2026" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Seleccionar problema</span>
+        <select id="examProblemSelect"></select>
+      </label>
+    </div>
+
+    <div class="action-row exam-actions">
+      <button class="btn btn-quiet" id="btnExamPrev" type="button">← Anterior</button>
+      <button class="btn btn-quiet" id="btnExamNext" type="button">Siguiente →</button>
+      <button class="btn btn-primary" id="btnSaveProblemToExam" type="button">
+        Guardar en el examen
+      </button>
+      <button class="btn btn-quiet" id="btnPreviewFilledPdf" type="button">
+        Vista previa
+      </button>
+      <button class="btn btn-quiet" id="btnDownloadFilledPdf" type="button">
+        Descargar PDF completado
+      </button>
+    </div>
+    <p id="examStatusBadge" class="status-message exam-status" role="status"></p>
+
+    <details class="exam-fine-tune">
+      <summary>Ajuste fino de posición (puntos PDF)</summary>
+      <div class="exam-offsets">
+        <label class="field"><span>Desplazar horizontal (→ +)</span>
+          <input type="number" id="examOffsetX" value="0" step="1"></label>
+        <label class="field"><span>Desplazar vertical (↑ +)</span>
+          <input type="number" id="examOffsetY" value="0" step="1"></label>
+      </div>
+    </details>
+
+    <iframe id="examPreviewFrame" class="exam-preview" title="Vista previa del PDF" hidden></iframe>
   </section>
 
   <section class="card" id="problemCard">
@@ -447,6 +511,9 @@
   <audio id="backgroundMusic" preload="metadata"></audio>
 </aside>
 
+<!-- Librerías para leer y rellenar el PDF original -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
