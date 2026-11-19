@@ -1769,27 +1769,85 @@ loadExample();
       sameQ;
   }
 
+  const ord = n => `${n}.ª`;
+
+  // Muestra los últimos intentos de bits: "2 bits: 2^2 - 2 = 2 [no] | 3 bits: 2^3 - 2 = 6 [OK]"
+  function bitsTrial(found) {
+    const from = Math.max(1, found - 2);
+    const out = [];
+    for (let b = from; b <= found; b++) {
+      out.push(`${b} bit${b > 1 ? "s" : ""}: 2^${b} - 2 = ${2 ** b - 2} ${b === found ? "[OK]" : "[no]"}`);
+    }
+    return (from > 1 ? "... " : "") + out.join("  |  ");
+  }
+
+  // Devuelve bloques: { text, indent } o { table: { head, rows, widths } }
   function buildProcedure(sol) {
     const dp = sol.defaultPrefix;
     const hostClass = 32 - dp;
-    const lines = [
-      `1) Clase ${sol.class}: el primer octeto es ${sol.ip[0]}. MSD = ${sol.defaultMask.join(".")} (/${dp}).`
+    const ordinals = [1, 2, 3, 4].map(i => Math.max(1, Math.floor(Number($(`#q${i}n`).value) || 1)));
+    const blocks = [];
+
+    blocks.push({ text: `1) Clase ${sol.class}: el primer octeto es ${sol.ip[0]}. MSD = ${sol.defaultMask.join(".")} (/${dp}).` });
+
+    const subnetsLine = () => [
+      { text: `Tomamos ${sol.nbt} bits para subredes → NTS = 2^${sol.nbt} = ${sol.nts}; NTSU = ${sol.nts} - 2 = ${sol.ntsu}.`, indent: 12 }
+    ];
+    const hostsLine = () => [
+      { text: `Los bits restantes son de host: ${sol.hostBits} → NTH = 2^${sol.hostBits} = ${sol.nth}; NTHU = ${sol.nth} - 2 = ${sol.nthu}.`, indent: 12 }
     ];
 
     if (sol.exerciseType === "nsu") {
-      lines.push(`2) Se piden ${sol.requiredSubnets} subredes utiles: 2^${sol.nbt} - 2 = ${sol.ntsu} >= ${sol.requiredSubnets}, por lo que NBT = ${sol.nbt} bits.`);
+      blocks.push({ text: `2) Piden ${sol.requiredSubnets} subredes útiles. Probamos: ${bitsTrial(sol.nbt)}` });
+      blocks.push(...subnetsLine(), ...hostsLine());
     } else if (sol.exerciseType === "nhu") {
-      lines.push(`2) Se piden ${sol.requiredHosts} hosts utiles: 2^${sol.hostBits} - 2 = ${sol.nthu} >= ${sol.requiredHosts}, por lo que quedan ${sol.hostBits} bits de host y NBT = ${hostClass} - ${sol.hostBits} = ${sol.nbt}.`);
+      blocks.push({ text: `2) Piden ${sol.requiredHosts} hosts útiles. Probamos: ${bitsTrial(sol.hostBits)}` });
+      blocks.push({ text: `Bits de host = ${sol.hostBits} → NTH = 2^${sol.hostBits} = ${sol.nth}; NTHU = ${sol.nth} - 2 = ${sol.nthu}.`, indent: 12 });
+      blocks.push({ text: `Los bits restantes son de subred: NBT = ${hostClass} - ${sol.hostBits} = ${sol.nbt} → NTS = 2^${sol.nbt} = ${sol.nts}; NTSU = ${sol.nts} - 2 = ${sol.ntsu}.`, indent: 12 });
     } else if (sol.exerciseType === "both") {
-      lines.push(`2) Se piden ${sol.requiredSubnets} subredes utiles: 2^${sol.nbt} - 2 = ${sol.ntsu} >= ${sol.requiredSubnets}, por lo que NBT = ${sol.nbt}. Quedan ${sol.hostBits} bits de host: 2^${sol.hostBits} - 2 = ${sol.nthu} >= ${sol.requiredHosts}, cumple ambos requisitos.`);
+      blocks.push({ text: `2) Piden ${sol.requiredSubnets} subredes útiles. Probamos: ${bitsTrial(sol.nbt)}` });
+      blocks.push(...subnetsLine(), ...hostsLine());
+      blocks.push({ text: `Piden ${sol.requiredHosts} hosts útiles y tenemos NTHU = ${sol.nthu} >= ${sol.requiredHosts}: cumple.`, indent: 12 });
     } else {
-      lines.push(`2) Prefijo /${sol.cidrPrefix}: NBT = ${sol.cidrPrefix} - ${dp} = ${sol.nbt} bits de subred y 32 - ${sol.cidrPrefix} = ${sol.hostBits} bits de host.`);
+      blocks.push({ text: `2) Prefijo /${sol.cidrPrefix}: NBT = ${sol.cidrPrefix} - ${dp} = ${sol.nbt} bits de subred.` });
+      blocks.push(...subnetsLine());
+      blocks.push({ text: `Bits de host = 32 - ${sol.cidrPrefix} = ${sol.hostBits} → NTH = 2^${sol.hostBits} = ${sol.nth}; NTHU = ${sol.nth} - 2 = ${sol.nthu}.`, indent: 12 });
     }
 
-    lines.push(`3) MSA: /${dp} + ${sol.nbt} = /${sol.prefix} -> ${sol.msa.join(".")}. Salto = 2^${sol.hostBits} = ${sol.blockSize}.`);
-    lines.push(`4) NTS = 2^${sol.nbt} = ${sol.nts}; NTSU = ${sol.nts} - 2 = ${sol.ntsu}. NTH = 2^${sol.hostBits} = ${sol.nth}; NTHU = ${sol.nth} - 2 = ${sol.nthu}.`);
-    lines.push(`5) Subred util k: red = red base + k x salto; difusion = siguiente red - 1; hosts = red + 1 hasta difusion - 1.`);
-    return lines;
+    blocks.push({ text: `MSA = /${dp} + ${sol.nbt} = /${sol.prefix} → ${sol.msa.join(".")}. Salto = 2^${sol.hostBits} = ${sol.blockSize}.`, indent: 12 });
+
+    const asks = [
+      `1) rango útil de la ${ord(ordinals[0])} subred`,
+      `2) número de subred de la ${ord(ordinals[1])}`,
+      `3) difusión de la ${ord(ordinals[2])}`,
+      `4) direcciones asignables de la ${ord(ordinals[3])}`
+    ];
+    blocks.push({ text: `3) Vemos qué pide cada pregunta: ${asks.join(";  ")}.` });
+
+    const byOrdinal = new Map();
+    ordinals.forEach((n, i) => byOrdinal.set(n, [...(byOrdinal.get(n) || []), `P${i + 1}`]));
+    const rows = [...byOrdinal.keys()].sort((x, y) => x - y).map(n => {
+      const sn = usefulSubnet(sol, n);
+      return sn
+        ? [`${ord(n)} (${byOrdinal.get(n).join(",")})`, sn.network, `${sn.first} – ${sn.last}`, sn.broadcast]
+        : [`${ord(n)} (${byOrdinal.get(n).join(",")})`, "no existe", "", ""];
+    });
+
+    blocks.push({ text: `4) Tabla solo con las subredes que piden (red = red base + n × salto, salto = ${sol.blockSize}):` });
+    blocks.push({
+      table: {
+        head: ["Subred útil", "Red", "Rango de hosts", "Difusión"],
+        widths: [70, 104, 190, 104],
+        rows
+      }
+    });
+
+    const answers = [1, 2, 3, 4].map(i =>
+      `${i}) ${expectedQuestion(sol, ordinals[i - 1], i - 1) || "no existe"}`);
+    blocks.push({ text: `5) Respuestas:  ${answers[0]}  |  ${answers[1]}` });
+    blocks.push({ text: `${answers[2]}  |  ${answers[3]}`, indent: 12 });
+
+    return blocks;
   }
 
   function collectAnswers() {
@@ -1847,6 +1905,72 @@ loadExample();
     });
     if (line) out.push(line);
     return out;
+  }
+
+  function layoutProcedure(blocks, font, size, maxW) {
+    const lineH = size * 1.22;
+    const rowH = size * 1.4;
+    const ops = [];
+    let y = 0;
+
+    blocks.forEach(raw => {
+      const b = typeof raw === "string" ? { text: raw } : raw;
+
+      if (b.table) {
+        ops.push({ table: b.table, y });
+        y += (b.table.rows.length + 1) * rowH + lineH * 0.35;
+        return;
+      }
+
+      const indent = b.indent || 0;
+      wrap(b.text, font, size, maxW - indent).forEach(t => {
+        ops.push({ text: t, x: indent, y });
+        y += lineH;
+      });
+      y += lineH * 0.15;
+    });
+
+    return { ops, height: y, rowH };
+  }
+
+  function drawProcedure(page, plan, size, top, reg, bold, color, dx, dy) {
+    const base = top - 11;
+    const line = { thickness: 0.5, color };
+
+    plan.ops.forEach(op => {
+      if (op.text !== undefined) {
+        page.drawText(safe(op.text), { x: BOX_LEFT + op.x + dx, y: base - op.y + dy, size, font: reg, color });
+        return;
+      }
+
+      const { head, rows, widths } = op.table;
+      const rh = plan.rowH;
+      const y0 = base - op.y + size * 0.9 + 1;
+      const total = widths.reduce((a, b) => a + b, 0);
+      const xs = widths.reduce((acc, w) => [...acc, acc[acc.length - 1] + w], [0]);
+      const left = BOX_LEFT + 12;
+
+      for (let i = 0; i <= rows.length + 1; i++) {
+        page.drawLine({
+          start: { x: left + dx, y: y0 - i * rh + dy },
+          end: { x: left + total + dx, y: y0 - i * rh + dy }, ...line
+        });
+      }
+      xs.forEach(x => page.drawLine({
+        start: { x: left + x + dx, y: y0 + dy },
+        end: { x: left + x + dx, y: y0 - (rows.length + 1) * rh + dy }, ...line
+      }));
+
+      [head, ...rows].forEach((cells, r) => {
+        cells.forEach((cell, c) => {
+          page.drawText(safe(cell), {
+            x: left + xs[c] + 3 + dx,
+            y: y0 - (r + 1) * rh + (rh - size) / 2 + size * 0.15 + dy,
+            size, font: r === 0 ? bold : reg, color
+          });
+        });
+      });
+    });
   }
 
   async function buildFilledPdf() {
@@ -1911,22 +2035,15 @@ loadExample();
       if (!boxLabel) return warnings.push(`P${prob.num} procedimiento`);
 
       const top = boxLabel.y - 15;
-      const availH = top - 8 - BOX_BOTTOM;
+      const availH = top - BOX_BOTTOM - 8;
       const maxW = BOX_RIGHT - BOX_LEFT;
-      const parts = ans.procedure || [];
+      const blocks = ans.procedure || [];
 
-      for (let size = 9.5; size >= 6; size -= 0.5) {
-        const lineH = size * 1.3;
-        const wrapped = parts.flatMap((p, i) => {
-          const w = wrap(p, reg, size, maxW);
-          return i < parts.length - 1 ? [...w, ""] : w;
-        });
-        if (wrapped.length * lineH <= availH || size === 6) {
-          wrapped.forEach((t, i) => {
-            if (t) page.drawText(t, { x: BOX_LEFT + dx, y: top - 13 - i * lineH + dy, size, font: reg, color });
-          });
-          break;
-        }
+      for (let size = 9; size >= 6; size -= 0.5) {
+        const plan = layoutProcedure(blocks, reg, size, maxW);
+        if (plan.height > availH && size > 6) continue;
+        drawProcedure(page, plan, size, top, reg, bold, color, dx, dy);
+        break;
       }
     });
 
