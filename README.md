@@ -95,7 +95,6 @@ Re-Subnetting/
 ├── app.js          # Motor matemático IPv4, validación de respuestas, tabla dinámica y Modo Examen
 ├── logo.png        # Logotipo principal de la aplicación
 ├── favicon.png     # Icono de la pestaña del navegador
-├── apple-touch-icon.png # Icono al añadir la página a la pantalla de inicio
 └── .nojekyll       # Indica a GitHub Pages que sirva los archivos tal cual
 ```
 
