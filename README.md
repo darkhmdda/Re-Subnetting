@@ -15,7 +15,7 @@
 
 **Re:Subnetting** es una herramienta académica diseñada para estudiantes y entusiastas de redes de computadoras. Permite resolver ejercicios de división de subredes IPv4 desde cero, practicar la manipulación de bits en la máscara de subred, visualizar rangos de direcciones en tiempo real y autoevaluar los resultados obtenidos.
 
-El sistema está construido sin dependencias externas, ofreciendo una interfaz oscura de alto contraste (*Dark Mode*) optimizada tanto para el estudio en pantalla como para la exportación limpia a documentos PDF.
+El sistema es un sitio estático (HTML, CSS y JavaScript puro, sin servidor ni cuentas de usuario), listo para publicarse en GitHub Pages, ofreciendo una interfaz oscura de alto contraste (*Dark Mode*) optimizada tanto para el estudio en pantalla como para la exportación limpia a documentos PDF.
 
 ---
 
@@ -67,10 +67,8 @@ Genera 4 preguntas específicas sobre subredes útiles personalizables (rango de
 ## Características adicionales
 
 * **Exportación inteligente a PDF (`@media print`):**
-  * Al hacer clic en **"Imprimir / Guardar PDF"**, la hoja de estilos oculta la barra superior, botones, controles y el reproductor de música, adaptando el diseño a fondo blanco sobre papel A4.
+  * Al hacer clic en **"Imprimir / Guardar PDF"**, la hoja de estilos oculta la barra superior, botones y controles, adaptando el diseño a fondo blanco sobre papel A4.
   * Además, filtra automáticamente la **Tabla de direcciones (Sección 05)** para imprimir **exclusivamente** las subredes que fueron consultadas en las preguntas de la Sección 06, evitando generar decenas de páginas innecesarias.
-* **Mini reproductor de audio integrado:**
-  * Reproductor flotante en la esquina inferior derecha con lista de reproducción local, control de volumen, silencio y auto-minimizado tras 5 segundos de inactividad (guardando el estado y volumen en `localStorage`).
 
 ---
 
@@ -94,12 +92,19 @@ El motor de cálculo en `app.js` aplica la convención académica estándar (**R
 Re-Subnetting/
 ├── index.html      # Estructura semántica del laboratorio (Secciones 01 a 06) y accesibilidad ARIA
 ├── styles.css      # Sistema de diseño oscuro, responsive design y reglas de impresión A4
-├── app.js          # Motor matemático IPv4, validación de respuestas, tabla dinámica y reproductor
+├── app.js          # Motor matemático IPv4, validación de respuestas, tabla dinámica y Modo Examen
 ├── logo.png        # Logotipo principal de la aplicación
-└── audio/          # Pistas MP3 para el reproductor de fondo
-    ├── So-Scandalous.mp3
-    ├── OH-TENGO-SUERTE.mp3
-    └── Re-Re.mp3
+└── .nojekyll       # Indica a GitHub Pages que sirva los archivos tal cual
+```
+
+---
+
+## Publicar en GitHub Pages
+
+1. En el repositorio ve a **Settings → Pages**.
+2. En **Build and deployment → Source** elige **Deploy from a branch**.
+3. Selecciona la rama `main` y la carpeta `/ (root)`, y pulsa **Save**.
+4. En uno o dos minutos la página estará en `https://<usuario>.github.io/Re-Subnetting/`.
 
 ---
 
